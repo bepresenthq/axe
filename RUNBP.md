@@ -10,10 +10,10 @@ On an Apple Silicon Mac with Xcode, Node 26+, Go and protobuf installed:
 
 ```sh
 node scripts/build-runbp.mjs
-.output/axe version
+.output/axe --version
 ```
 
-The build fetches the pinned idb protocol, verifies its SHA-256, generates Go bindings, runs the runbp unit tests and compiles `v0.0.14-runbp.1`. It does not launch a simulator. Pass an absolute output path as the first argument to build for runbp's private tool cache. Native use also needs `idb-companion`.
+The build fetches the pinned idb protocol, verifies its SHA-256, generates Go bindings, runs the runbp unit tests and compiles `v0.0.14-runbp.2`. It does not launch a simulator. Pass an absolute output path as the first argument to build for runbp's private tool cache. Native use also needs `idb-companion`.
 
 ## Maintenance
 

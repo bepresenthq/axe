@@ -24,4 +24,4 @@ jobs:
           cache-dependency-path: cmd/go.sum
       - run: brew install protobuf
       - run: node scripts/build-runbp.mjs
-      - run: test "$(.output/axe version)" = "axe version v0.0.14-runbp.1"
+      - run: test "$(.output/axe --version)" = "axe version v0.0.14-runbp.2"
