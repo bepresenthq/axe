@@ -114,7 +114,7 @@ try {
     [
       "build",
       "-ldflags",
-      "-X main.version=v0.0.14-runbp.2",
+      "-X main.version=v0.0.15-runbp.1",
       "-o",
       binary + ".tmp",
       "./axe",

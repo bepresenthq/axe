@@ -13,7 +13,7 @@ node scripts/build-runbp.mjs
 .output/axe --version
 ```
 
-The build fetches the pinned idb protocol, verifies its SHA-256, generates Go bindings, runs the runbp unit tests, builds both Swift analysis helpers in one SwiftPM build, and compiles `v0.0.14-runbp.2`. It does not launch a simulator. Pass an absolute output path as the first argument to build for runbp's private tool cache. Native use also needs `idb-companion`. Keep `axe-parser` and `axe-index-reader` beside the built `axe` executable when installing or packaging it. Runbp releases use these bundled helpers instead of downloading or compiling them during the first preview open.
+The build fetches the pinned idb protocol, verifies its SHA-256, generates Go bindings, runs the runbp unit tests, builds both Swift analysis helpers in one SwiftPM build, and compiles `v0.0.15-runbp.1`. It does not launch a simulator. Pass an absolute output path as the first argument to build for runbp's private tool cache. Native use also needs `idb-companion`. Keep `axe-parser` and `axe-index-reader` beside the built `axe` executable when installing or packaging it. Runbp releases use these bundled helpers instead of downloading or compiling them during the first preview open.
 
 ## Maintenance
 
