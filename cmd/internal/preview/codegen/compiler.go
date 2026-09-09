@@ -82,7 +82,11 @@ func compileAndLink(ctx context.Context, cfg CompileConfig, buildDir, sdk, targe
 	}
 	args = append(args, thunkPaths...)
 	for _, p := range cfg.ExtraIncludePaths {
-		args = append(args, "-I", p)
+		if strings.HasSuffix(p, ".hmap") {
+			args = append(args, "-Xcc", "-I"+p)
+		} else {
+			args = append(args, "-I", p)
+		}
 	}
 	for _, p := range cfg.ExtraFrameworkPaths {
 		args = append(args, "-F", p)

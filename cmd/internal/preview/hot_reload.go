@@ -40,6 +40,10 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	ws *watchState, hid *protocol.HIDHandler,
 	idbErrCh <-chan error, bootDiedCh <-chan struct{}) error {
 
+	if dir := os.Getenv("RUNBP_CONTROL_DIR"); dir != "" {
+		return runbpControlledWatcher(ctx, dir, sourceFile, pc, bs, dirs, wctx, ws)
+	}
+
 	// Set up shared file watcher.
 	watchRoot := filepath.Dir(pc.PrimaryPath())
 	sw, err := watch.NewSharedWatcher(ctx, watchRoot, wctx.sources)

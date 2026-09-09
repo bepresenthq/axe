@@ -4,6 +4,8 @@ package build
 // plus additional compiler paths extracted from the swiftc response file.
 type Settings struct {
 	ModuleName       string
+	TargetName       string
+	Configuration    string
 	BundleID         string // axe-prefixed bundle ID (used for terminate/launch)
 	OriginalBundleID string // original bundle ID from xcodebuild
 	BuiltProductsDir string

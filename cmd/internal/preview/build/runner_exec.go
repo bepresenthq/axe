@@ -1,8 +1,11 @@
 package build
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/k-kohey/axe/internal/procgroup"
 )
@@ -15,6 +18,7 @@ type commandRunner struct{}
 func NewRunner() Runner { return &commandRunner{} }
 
 func (r *commandRunner) FetchBuildSettings(ctx context.Context, args []string) ([]byte, error) {
+	fmt.Fprintln(os.Stderr, "[runbp] Resolving packages and reading build settings")
 	return run(ctx, args)
 }
 
@@ -26,5 +30,10 @@ func run(ctx context.Context, args []string) ([]byte, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("empty command args")
 	}
-	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
+	var output bytes.Buffer
+	cmd := procgroup.Command(ctx, args[0], args[1:]...)
+	cmd.Stdout = io.MultiWriter(&output, os.Stderr)
+	cmd.Stderr = cmd.Stdout
+	err := cmd.Run()
+	return output.Bytes(), err
 }

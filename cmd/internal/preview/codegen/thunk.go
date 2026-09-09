@@ -71,6 +71,7 @@ public func _axePreviewRefresh() {
     for scene in UIApplication.shared.connectedScenes {
         guard let ws = scene as? UIWindowScene else { continue }
         guard let window = ws.windows.first else { continue }
+        hc.view.accessibilityIdentifier = "runbp.preview.root"
         window.rootViewController = hc
         window.makeKeyAndVisible()
         break

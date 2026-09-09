@@ -191,6 +191,11 @@ func Run(opts RunOptions) error {
 	}
 	dylibPath := compileResult.DylibPath
 
+	if err := runbpWaitForDevice(ctx, os.Getenv("RUNBP_DEVICE_READY_FILE"), device); err != nil {
+		sendStopped("boot_error", err.Error(), "")
+		return err
+	}
+
 	// Boot the simulator.
 	// For external (standard Xcode set) devices, use simctl boot (non-headless)
 	// and skip shutdown on exit since the user may be using the device elsewhere.

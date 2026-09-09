@@ -412,7 +412,7 @@ func TestExtractCompilerPaths_IncludePaths(t *testing.T) {
 	}
 }
 
-func TestExtractCompilerPaths_SkipsHmapAndBuiltProducts(t *testing.T) {
+func TestExtractCompilerPaths_KeepsHmapSkipsBuiltProducts(t *testing.T) {
 	bs, dirs := setupRespFile(t, `-I/products/dir
 -I/path/to/target.hmap
 -I/other/headers
@@ -421,10 +421,10 @@ func TestExtractCompilerPaths_SkipsHmapAndBuiltProducts(t *testing.T) {
 
 	ExtractCompilerPaths(context.Background(), bs, dirs)
 
-	if len(bs.ExtraIncludePaths) != 1 {
-		t.Fatalf("ExtraIncludePaths count = %d, want 1", len(bs.ExtraIncludePaths))
+	if len(bs.ExtraIncludePaths) != 2 {
+		t.Fatalf("ExtraIncludePaths count = %d, want 2", len(bs.ExtraIncludePaths))
 	}
-	if bs.ExtraIncludePaths[0] != "/other/headers" {
+	if bs.ExtraIncludePaths[0] != "/path/to/target.hmap" {
 		t.Errorf("ExtraIncludePaths[0] = %q", bs.ExtraIncludePaths[0])
 	}
 }
@@ -777,4 +777,28 @@ func writeDependencyManifest(t *testing.T, dirs ProjectDirs, moduleName string, 
 		t.Fatal(err)
 	}
 	return manifestPath
+}
+
+func TestPreviewDiscoveryAndBuildUseMatchingAppleSiliconSettings(t *testing.T) {
+	t.Parallel()
+	r := &fakeRunner{fetchOutput: []byte("PRODUCT_MODULE_NAME = Fixture\nPRODUCT_BUNDLE_IDENTIFIER = dev.fixture\nIPHONEOS_DEPLOYMENT_TARGET = 17.0\n")}
+	pc := ProjectConfig{Project: "Fixture.xcodeproj", Scheme: "Fixture"}
+	dirs := ProjectDirs{Build: t.TempDir()}
+	if _, err := FetchSettings(context.Background(), pc, dirs, r); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(context.Background(), pc, dirs, r); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{r.fetchArgs, r.buildArgs} {
+		for _, flag := range []string{"ARCHS=arm64", "ONLY_ACTIVE_ARCH=YES", "ENABLE_DEBUG_DYLIB=YES", "OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports"} {
+			if !slices.Contains(args, flag) {
+				t.Errorf("missing %q in %v", flag, args)
+			}
+		}
+		index := slices.Index(args, "-derivedDataPath")
+		if index < 0 || args[index+1] != dirs.Build {
+			t.Errorf("wrong DerivedData arguments: %v", args)
+		}
+	}
 }

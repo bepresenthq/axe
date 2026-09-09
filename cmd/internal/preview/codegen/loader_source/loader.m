@@ -8,6 +8,9 @@
 
 #define LOG(fmt, ...) NSLog(@"[axe-loader] " fmt, ##__VA_ARGS__)
 
+static BOOL runbpInitialReady = NO;
+static void (*runbpRefresh)(void) = NULL;
+
 static void *listener_thread(void *arg) {
     const char *sock_path = (const char *)arg;
 
@@ -47,6 +50,30 @@ static void *listener_thread(void *arg) {
         // Trim trailing newline
         while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) { buf[--n] = '\0'; }
 
+        if (strcmp(buf, "RUNBP_BARRIER") == 0) {
+            __block BOOL ready = NO;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                if (runbpInitialReady && runbpRefresh) {
+                    // App activation can precede creation of the SwiftUI window.
+                    // Retry mounting until an actual preview root exists.
+                    BOOL mounted = NO;
+                    for (UIWindow *window in [UIApplication sharedApplication].windows) {
+                        if ([window.rootViewController.view.accessibilityIdentifier isEqualToString:@"runbp.preview.root"]) mounted = YES;
+                    }
+                    if (!mounted) runbpRefresh();
+                    for (UIWindow *window in [UIApplication sharedApplication].windows) {
+                        [window layoutIfNeeded];
+                        if ([window.rootViewController.view.accessibilityIdentifier isEqualToString:@"runbp.preview.root"]) ready = YES;
+                    }
+                }
+            });
+            // Allow the main-thread transaction to reach the compositor.
+            usleep(50000);
+            write(client, ready ? "OK\n" : "WAIT\n", ready ? 3 : 5);
+            close(client);
+            continue;
+        }
+
         LOG("Loading dylib: %s", buf);
         void *handle = dlopen(buf, RTLD_NOW);
         if (handle) {
@@ -55,6 +82,7 @@ static void *listener_thread(void *arg) {
             RefreshFunc refresh = (RefreshFunc)dlsym(handle, "axe_preview_refresh");
             dispatch_sync(dispatch_get_main_queue(), ^{
                 if (refresh) {
+                    runbpRefresh = refresh;
                     refresh();
                     LOG("Called axe_preview_refresh");
                 }
@@ -102,7 +130,9 @@ static void axe_loader_init(void) {
         typedef void (*RefreshFunc)(void);
         RefreshFunc refresh = (RefreshFunc)dlsym(RTLD_DEFAULT, "axe_preview_refresh");
         if (refresh) {
+            runbpRefresh = refresh;
             refresh();
+            dispatch_async(dispatch_get_main_queue(), ^{ runbpInitialReady = YES; });
             LOG("Initial preview refresh triggered");
         }
     };

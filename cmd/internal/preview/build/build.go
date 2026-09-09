@@ -44,6 +44,19 @@ func Prepare(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, reuse bool
 	return &Result{Settings: s, Dirs: dirs, Built: built}, nil
 }
 
+// runbp's native host and thunk compiler require Apple Silicon. Use the same
+// settings for discovery and compilation so neither builds Intel products or
+// resolves a different package graph for the preview.
+func previewBuildArgs(dirs ProjectDirs) []string {
+	return []string{
+		"-destination", "generic/platform=iOS Simulator",
+		"-derivedDataPath", dirs.Build,
+		"ARCHS=arm64", "ONLY_ACTIVE_ARCH=YES",
+		"ENABLE_DEBUG_DYLIB=YES",
+		"OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports",
+	}
+}
+
 // FetchSettings runs "xcodebuild -showBuildSettings" and parses the output
 // into a Settings struct.
 func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Runner) (*Settings, error) {
@@ -51,7 +64,7 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 		[]string{"xcodebuild", "-showBuildSettings"},
 		pc.XcodebuildArgs()...,
 	)
-	args = append(args, "-destination", "generic/platform=iOS Simulator")
+	args = append(args, previewBuildArgs(dirs)...)
 
 	out, err := r.FetchBuildSettings(ctx, args)
 	if err != nil {
@@ -60,6 +73,8 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 
 	keys := map[string]string{
 		"PRODUCT_MODULE_NAME":        "",
+		"TARGET_NAME":                "",
+		"CONFIGURATION":              "",
 		"PRODUCT_BUNDLE_IDENTIFIER":  "",
 		"IPHONEOS_DEPLOYMENT_TARGET": "",
 		"SWIFT_VERSION":              "",
@@ -84,6 +99,8 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 
 	s := &Settings{
 		ModuleName:       keys["PRODUCT_MODULE_NAME"],
+		TargetName:       keys["TARGET_NAME"],
+		Configuration:    config,
 		BundleID:         "axe." + keys["PRODUCT_BUNDLE_IDENTIFIER"],
 		OriginalBundleID: keys["PRODUCT_BUNDLE_IDENTIFIER"],
 		BuiltProductsDir: builtProductsDir,
@@ -124,11 +141,7 @@ func Run(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Runner) erro
 		[]string{"xcodebuild", "build"},
 		pc.XcodebuildArgs()...,
 	)
-	args = append(args,
-		"-destination", "generic/platform=iOS Simulator",
-		"-derivedDataPath", dirs.Build,
-		"OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports",
-	)
+	args = append(args, previewBuildArgs(dirs)...)
 
 	out, err := r.Build(ctx, args)
 	if err != nil {
@@ -156,96 +169,79 @@ func ExtractCompilerPaths(ctx context.Context, s *Settings, dirs ProjectDirs) {
 		return
 	}
 	defer lock.RUnlock()
-	// Response files live under:
-	//   <dirs.Build>/Build/Intermediates.noindex/
-	//     <project>.build/<config>-iphonesimulator/<module>.build/
-	//     Objects-normal/arm64/arguments-<hash>.resp
-	respPattern := filepath.Join(
-		dirs.Build, "Build", "Intermediates.noindex",
-		"*", "*", s.ModuleName+".build", "Objects-normal", "arm64", "arguments-*.resp",
-	)
-	matches, _ := filepath.Glob(respPattern)
-	if len(matches) > 0 {
-		// Read the first matching resp file.
-		data, err := os.ReadFile(matches[0])
-		if err != nil {
-			slog.Warn("Failed to read swiftc response file", "path", matches[0], "err", err)
-			return
+	target := s.TargetName
+	if target == "" {
+		target = s.ModuleName
+	}
+	configuration := s.Configuration
+	if configuration == "" {
+		configuration = "Debug"
+	}
+	targetPattern := filepath.Join(dirs.Build, "Build", "Intermediates.noindex", "*", configuration+"-iphonesimulator", target+".build")
+	objects := filepath.Join(targetPattern, "Objects-normal", "arm64")
+	// New Xcode versions put Clang search paths in common-args response files,
+	// while Swift explicit dependency manifests carry the module maps. Read both.
+	deps, _ := filepath.Glob(filepath.Join(objects, "*-dependencies-*.json"))
+	if len(deps) > 0 {
+		if err := extractCompilerPathsFromDependencies(s, dirs.Build, newestCompilerFile(deps)); err != nil {
+			slog.Warn("Failed to extract compiler paths", "err", err)
 		}
-		extractCompilerPathsFromResp(s, string(data))
-		return
 	}
-
-	slog.Debug("No swiftc response file found", "pattern", respPattern)
-
-	// Xcode 26 no longer emits arguments-*.resp for Swift compilation in some
-	// configurations. Fall back to the explicit dependency manifest that now
-	// contains clang module map paths for SPM packages and SDK overlays.
-	depsPattern := filepath.Join(
-		dirs.Build, "Build", "Intermediates.noindex",
-		"*", "*", s.ModuleName+".build", "Objects-normal", "arm64", "*-dependencies-*.json",
-	)
-	depMatches, _ := filepath.Glob(depsPattern)
-	if len(depMatches) == 0 {
-		slog.Debug("No dependency manifest found for compiler paths", "pattern", depsPattern)
-		return
+	for _, pattern := range []string{"arguments-*.resp", "*-common-args.resp"} {
+		matches, _ := filepath.Glob(filepath.Join(objects, pattern))
+		if len(matches) == 0 {
+			continue
+		}
+		for _, file := range []string{newestCompilerFile(matches)} {
+			data, err := os.ReadFile(file)
+			if err != nil {
+				slog.Warn("Failed to read compiler response", "path", file, "err", err)
+				continue
+			}
+			extractCompilerPathsFromResp(s, string(data))
+		}
 	}
-
-	if err := extractCompilerPathsFromDependencies(s, dirs.Build, depMatches[0]); err != nil {
-		slog.Warn("Failed to extract compiler paths from dependency manifest", "path", depMatches[0], "err", err)
-		return
+	// Swift-only targets may not emit a Clang response file. Their header maps
+	// still belong to the target, and are needed by serialized bridging headers.
+	maps, _ := filepath.Glob(filepath.Join(targetPattern, s.ModuleName+"-*.hmap"))
+	for _, file := range maps {
+		s.ExtraIncludePaths = appendUnique(s.ExtraIncludePaths, file)
 	}
 }
 
 func extractCompilerPathsFromResp(s *Settings, data string) {
-	seenI := map[string]bool{s.BuiltProductsDir: true}
-	seenF := map[string]bool{s.BuiltProductsDir: true}
-	seenM := map[string]bool{}
-
-	lines := strings.Split(data, "\n")
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-
-		// -fmodule-map-file=<path> (single line)
-		if after, ok := strings.CutPrefix(line, "-fmodule-map-file="); ok {
-			p := after
-			if p != "" && !seenM[p] {
-				seenM[p] = true
-				s.ExtraModuleMapFiles = append(s.ExtraModuleMapFiles, p)
-			}
+	args, err := responseArguments(data)
+	if err != nil {
+		slog.Warn("Invalid compiler response file", "err", err)
+		return
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if p, ok := strings.CutPrefix(arg, "-fmodule-map-file="); ok {
+			s.ExtraModuleMapFiles = appendUnique(s.ExtraModuleMapFiles, p)
 			continue
 		}
-
-		// -I<path> (combined) or -I\n<path> (split across two lines)
-		if after, ok := strings.CutPrefix(line, "-I"); ok {
-			p := after
-			if p == "" && i+1 < len(lines) {
-				i++
-				p = lines[i]
-			}
-			if strings.HasSuffix(p, ".hmap") || p == "" || seenI[p] {
+		for _, flag := range []string{"-iquote", "-isystem", "-I", "-F"} {
+			p, ok := strings.CutPrefix(arg, flag)
+			if !ok {
 				continue
 			}
-			seenI[p] = true
-			s.ExtraIncludePaths = append(s.ExtraIncludePaths, p)
-			continue
-		}
-
-		// -F<path> (combined) or -F\n<path> (split across two lines)
-		if after, ok := strings.CutPrefix(line, "-F"); ok {
-			p := after
-			if p == "" && i+1 < len(lines) {
+			if p == "" && i+1 < len(args) {
 				i++
-				p = lines[i]
+				p = args[i]
 			}
-			if p == "" || seenF[p] {
-				continue
+			if p == "" || p == s.BuiltProductsDir {
+				break
 			}
-			seenF[p] = true
-			s.ExtraFrameworkPaths = append(s.ExtraFrameworkPaths, p)
-			continue
+			if flag == "-F" {
+				s.ExtraFrameworkPaths = appendUnique(s.ExtraFrameworkPaths, p)
+			} else {
+				s.ExtraIncludePaths = appendUnique(s.ExtraIncludePaths, p)
+			}
+			break
 		}
 	}
+
 	slog.Debug("Extracted paths from resp file",
 		"includePaths", len(s.ExtraIncludePaths),
 		"frameworkPaths", len(s.ExtraFrameworkPaths),
@@ -396,4 +392,18 @@ func HasPreviousBuild(s *Settings, dirs ProjectDirs) bool {
 	pattern := filepath.Join(dirs.Build, "Build", "Products", "*", appName)
 	matches, _ := filepath.Glob(pattern)
 	return len(matches) > 0
+}
+
+// Old response/manifests can survive incremental builds after package or branch
+// changes. Use the last compiler invocation, never merge stale search paths.
+func newestCompilerFile(files []string) string {
+	newest := files[0]
+	for _, file := range files[1:] {
+		a, errA := os.Stat(file)
+		b, errB := os.Stat(newest)
+		if errA == nil && (errB != nil || a.ModTime().After(b.ModTime())) {
+			newest = file
+		}
+	}
+	return newest
 }

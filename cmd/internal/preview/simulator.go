@@ -84,6 +84,11 @@ func installApp(ctx context.Context, bs *build.Settings, dirs previewDirs, devic
 	)
 	rewriteEmbeddedAppExtensionBundleIDs(stagedAppPath, bs.OriginalBundleID, bs.BundleID)
 
+	if os.Getenv("RUNBP_CONTROL_DIR") != "" {
+		if err := runbpStageHost(ctx, stagedAppPath, bs.DeploymentTarget); err != nil {
+			return "", err
+		}
+	}
 	if err := ar.Install(ctx, device, stagedAppPath, deviceSetPath); err != nil {
 		return "", fmt.Errorf("install: %w", err)
 	}
@@ -128,6 +133,12 @@ func rewriteEmbeddedAppExtensionBundleIDs(appPath, originalBundleID, bundleID st
 	}
 
 	plistPaths, err := filepath.Glob(filepath.Join(appPath, "PlugIns", "*.appex", "Info.plist"))
+	extensionPaths, extensionErr := filepath.Glob(filepath.Join(appPath, "Extensions", "*.appex", "Info.plist"))
+	if extensionErr != nil {
+		slog.Warn("Failed to find ExtensionKit bundles", "err", extensionErr)
+		return
+	}
+	plistPaths = append(plistPaths, extensionPaths...)
 	if err != nil {
 		slog.Warn("Failed to find app extension Info.plist files", "app", appPath, "err", err)
 		return
