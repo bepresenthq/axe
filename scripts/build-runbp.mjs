@@ -75,13 +75,40 @@ try {
     [
       "test",
       "./internal/preview/build",
+      "./internal/preview/analysis",
       "./internal/preview",
       "-run",
       "TestRunbp|TestPreviewDiscoveryAndBuildUseMatchingAppleSiliconSettings",
     ],
     path.join(scratch, "cmd"),
   );
+  // Build both helpers together so SwiftPM shares dependency compilation.
+  // Bundle them beside axe; preview open must not bootstrap SwiftSyntax.
+  const analysisPackage = path.join(
+    scratch,
+    "cmd/internal/preview/analysis/swift-analysis",
+  );
+  const analysisBuild = path.join(toolDirectory, "swift-analysis");
+  run(
+    "swift",
+    [
+      "build",
+      "-c",
+      "release",
+      "--package-path",
+      analysisPackage,
+      "--scratch-path",
+      analysisBuild,
+    ],
+    scratch,
+  );
   fs.mkdirSync(destination, { recursive: true });
+  for (const product of ["axe-parser", "axe-index-reader"]) {
+    const staged = path.join(destination, product + ".tmp");
+    fs.copyFileSync(path.join(analysisBuild, "release", product), staged);
+    fs.chmodSync(staged, 0o755);
+    fs.renameSync(staged, path.join(destination, product));
+  }
   run(
     "go",
     [

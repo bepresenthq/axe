@@ -238,3 +238,20 @@ func TestDownloadSwiftBinary(t *testing.T) {
 		}
 	})
 }
+
+func TestRunbpBundledHelpersAvoidDownloadAndSourceBuild(t *testing.T) {
+	previous := Version
+	Version = "v0.0.14-runbp.2"
+	defer func() { Version = previous }()
+	for _, product := range []string{"axe-parser", "axe-index-reader"} {
+		unexpected := func(string) (string, error) { t.Fatal("bundled helper attempted download or build"); return "", nil }
+		got, err := resolveSwiftBinaryWith(product, func(name string) string { return "/bundle/" + name }, unexpected, unexpected)
+		if err != nil || got != "/bundle/"+product {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	}
+	// Fork versions have no matching upstream release to download.
+	if _, err := downloadSwiftBinary("axe-parser"); err == nil {
+		t.Fatal("expected fork version to skip upstream download")
+	}
+}

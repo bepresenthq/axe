@@ -59,25 +59,30 @@ func ensureIndexReader() (string, error) {
 
 // resolveSwiftBinary locates a Swift CLI binary through a fallback chain:
 //   - Dev builds:     sibling binary (mise deploy) → build from embedded source
+//   - runbp builds:   bundled sibling binary → build from embedded source
 //   - Release builds: download from GitHub Releases  → build from embedded source
 func resolveSwiftBinary(product string) (string, error) {
-	if Version == "dev" {
-		if p := findPreinstalledBinary(product); p != "" {
+	return resolveSwiftBinaryWith(product, findPreinstalledBinary, downloadSwiftBinary, buildSwiftAnalysisProduct)
+}
+
+func resolveSwiftBinaryWith(product string, sibling func(string) string, download, build func(string) (string, error)) (string, error) {
+	if Version == "dev" || strings.Contains(Version, "-runbp.") {
+		if p := sibling(product); p != "" {
 			slog.Debug("Found pre-installed binary", "product", product, "path", p)
 			return p, nil
 		}
 	}
-	if p, err := downloadSwiftBinary(product); err != nil {
+	if p, err := download(product); err != nil {
 		slog.Debug("Download from GitHub Releases failed, falling back to source build", "product", product, "error", err)
 	} else {
 		return p, nil
 	}
-	return buildSwiftAnalysisProduct(product)
+	return build(product)
 }
 
 // findPreinstalledBinary checks if a pre-built binary exists in the same
 // directory as the running axe executable (e.g. placed by mise deploy).
-// Used only for dev builds; release builds use downloadSwiftBinary instead.
+// Used for dev and runbp builds; upstream releases use downloadSwiftBinary.
 func findPreinstalledBinary(product string) string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -106,7 +111,7 @@ const githubRepo = "k-kohey/axe"
 // downloadSwiftBinary downloads a pre-built binary from the GitHub Release
 // matching the current axe version. Skipped for dev builds.
 func downloadSwiftBinary(product string) (string, error) {
-	if Version == "" || Version == "dev" {
+	if Version == "" || Version == "dev" || strings.Contains(Version, "-runbp.") {
 		return "", fmt.Errorf("no release version available")
 	}
 
