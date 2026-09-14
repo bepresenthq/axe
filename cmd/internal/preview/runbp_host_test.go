@@ -25,16 +25,8 @@ func TestRunbpSimulatorEntitlements(t *testing.T) {
 	if got["com.apple.security.application-groups"].([]any)[0] != "group.dev.fixture" {
 		t.Fatal(got)
 	}
-	unsigned, err := runbpSimulatorEntitlements(nil, "Fixture.entitlements")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var unsignedMap map[string]any
-	if _, err := plist.Unmarshal(unsigned, &unsignedMap); err != nil {
-		t.Fatal(err)
-	}
-	if len(unsignedMap) != 1 || unsignedMap["get-task-allow"] != true {
-		t.Fatalf("unsigned app acquired unembedded capabilities: %#v", unsignedMap)
+	if _, err := runbpSimulatorEntitlements(nil, "Fixture.entitlements"); err == nil || !strings.Contains(err.Error(), "no embedded entitlements") {
+		t.Fatalf("missing capability accepted: %v", err)
 	}
 	if _, err := runbpSimulatorEntitlements([]byte("invalid"), ""); err == nil {
 		t.Fatal("invalid plist accepted")

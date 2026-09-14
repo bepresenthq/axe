@@ -131,6 +131,7 @@ func selectAppBuildSettings(output, scheme string) (map[string]string, error) {
 		current = map[string]string{}
 	}
 	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "Build settings for action ") && strings.Contains(line, " and target ") && strings.HasSuffix(line, ":") {

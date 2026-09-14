@@ -101,7 +101,7 @@ func runbpSimulatorEntitlements(data []byte, declared string) ([]byte, error) {
 			return nil, fmt.Errorf("invalid simulator entitlements: %w", err)
 		}
 	} else if declared != "" {
-		slog.Warn("Preview executable has no embedded simulator entitlements; declared capabilities are unavailable in this host. This is expected when simulator code signing is disabled. Preview views that do not require those capabilities, or verify capability-dependent flows through the normally signed full app; no application checkout changes are required", "declaredEntitlements", declared)
+		return nil, fmt.Errorf("preview app declares %s but its built simulator executable has no embedded entitlements; enable simulator signing in the Debug build configuration and rebuild", declared)
 	}
 	entitlements["get-task-allow"] = true
 	for key := range entitlements {

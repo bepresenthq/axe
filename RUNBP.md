@@ -27,7 +27,7 @@ The initial release preserves previously tested renderer code. Native Xcode comp
 
 ## Simulator host capabilities
 
-The replacement host embeds Xcode's resolved simulator entitlements from the staged executable in its own Mach-O `__TEXT,__entitlements` section before ad-hoc signing. App-group names and other capability values are preserved. If signing is disabled or a declared entitlement file has no embedded simulator metadata, the host warns that those capabilities are unavailable. Views without those dependencies can still preview. Verify capability-dependent flows through the normally signed full app; do not edit the app checkout to set up previews.
+The replacement host embeds Xcode's resolved simulator entitlements from the staged executable in its own Mach-O `__TEXT,__entitlements` section before ad-hoc signing. App-group names and other capability values are preserved. A declared entitlement file without embedded simulator metadata produces an actionable error instead of a host missing its declared capabilities.
 
 The host keeps built resources and Info.plist keys except for its launch screen, main storyboard and scene configuration. Production App/delegate startup remains bypassed. The `axe.` bundle identity and rewritten extension IDs can affect keychain, URL routing, cloud and notification services. Capability warnings describe the required full-app verification; they do not claim entitlement metadata makes a service available.
 
