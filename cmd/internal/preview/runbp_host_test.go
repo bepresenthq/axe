@@ -1,11 +1,40 @@
 package preview
 
 import (
+	"howett.net/plist"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRunbpSimulatorEntitlements(t *testing.T) {
+	original := map[string]any{"com.apple.security.application-groups": []any{"group.dev.fixture"}, "custom-capability": "resolved-value"}
+	data, _ := plist.Marshal(original, plist.XMLFormat)
+	encoded, err := runbpSimulatorEntitlements(data, "Fixture.entitlements")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if _, err := plist.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["get-task-allow"] != true || got["custom-capability"] != "resolved-value" {
+		t.Fatalf("lost entitlements: %#v", got)
+	}
+	if got["com.apple.security.application-groups"].([]any)[0] != "group.dev.fixture" {
+		t.Fatal(got)
+	}
+	if _, err := runbpSimulatorEntitlements(nil, "Fixture.entitlements"); err == nil || !strings.Contains(err.Error(), "no embedded entitlements") {
+		t.Fatalf("missing capability accepted: %v", err)
+	}
+	if _, err := runbpSimulatorEntitlements([]byte("invalid"), ""); err == nil {
+		t.Fatal("invalid plist accepted")
+	}
+	if _, err := runbpSimulatorEntitlements(nil, ""); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRunbpExtensionKitBundleIDs(t *testing.T) {
 	app := filepath.Join(t.TempDir(), "App.app")

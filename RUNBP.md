@@ -13,7 +13,7 @@ node scripts/build-runbp.mjs
 .output/axe --version
 ```
 
-The build fetches the pinned idb protocol, verifies its SHA-256, generates Go bindings, runs the runbp unit tests, builds both Swift analysis helpers in one SwiftPM build, and compiles `v0.0.15-runbp.1`. It does not launch a simulator. Pass an absolute output path as the first argument to build for runbp's private tool cache. Native use also needs `idb-companion`. Keep `axe-parser` and `axe-index-reader` beside the built `axe` executable when installing or packaging it. Runbp releases use these bundled helpers instead of downloading or compiling them during the first preview open.
+The build fetches the pinned idb protocol, verifies its SHA-256, generates Go bindings, runs the runbp unit tests, builds both Swift analysis helpers in one SwiftPM build, and compiles `v0.0.15-runbp.2`. It does not launch a simulator. Pass an absolute output path as the first argument to build for runbp's private tool cache. Native use also needs `idb-companion`. Keep `axe-parser` and `axe-index-reader` beside the built `axe` executable when installing or packaging it. Runbp releases use these bundled helpers instead of downloading or compiling them during the first preview open.
 
 ## Maintenance
 
@@ -24,3 +24,11 @@ The build fetches the pinned idb protocol, verifies its SHA-256, generates Go bi
 - Update runbp's `scripts/preview-backend/source.json` with the tag, full commit and binary version together. Runbp verifies the checkout commit and keeps each revision in a separate tool directory.
 
 The initial release preserves previously tested renderer code. Native Xcode comparison testing was stopped at the user's request; this fork extraction does not claim a new native acceptance run.
+
+## Simulator host capabilities
+
+The replacement host embeds Xcode's resolved simulator entitlements from the staged executable in its own Mach-O `__TEXT,__entitlements` section before ad-hoc signing. App-group names and other capability values are preserved. A declared entitlement file without embedded simulator metadata produces an actionable error instead of a host missing its declared capabilities.
+
+The host keeps built resources and Info.plist keys except for its launch screen, main storyboard and scene configuration. Production App/delegate startup remains bypassed. The `axe.` bundle identity and rewritten extension IDs can affect keychain, URL routing, cloud and notification services. Capability warnings describe the required full-app verification; they do not claim entitlement metadata makes a service available.
+
+Run runbp's `npm run test:preview:native` with `RUNBP_AXE` pointing to this build to exercise shared-container writes after reset, app crashes, backend restart and host regeneration.

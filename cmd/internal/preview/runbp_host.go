@@ -2,7 +2,9 @@ package preview
 
 import (
 	"context"
+	"debug/macho"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +16,7 @@ import (
 // Replace only the staged executable. The application's Debug dylib supplies
 // its symbols/resources, but its SwiftUI App or UIApplicationDelegate is never
 // instantiated. Source files and original build products remain untouched.
-func runbpStageHost(ctx context.Context, app, deploymentTarget string) error {
+func runbpStageHost(ctx context.Context, app, deploymentTarget string, declaredEntitlements string) error {
 	infoPath := filepath.Join(app, "Info.plist")
 	data, err := os.ReadFile(infoPath)
 	if err != nil {
@@ -32,6 +34,14 @@ func runbpStageHost(ctx context.Context, app, deploymentTarget string) error {
 	if _, err := os.Stat(library); err != nil {
 		return fmt.Errorf("preview needs Xcode's Debug dylib; ENABLE_DEBUG_DYLIB=YES did not produce %s", library)
 	}
+	entitlements, err := runbpHostEntitlements(filepath.Join(app, executable), declaredEntitlements)
+	if err != nil {
+		return err
+	}
+	entitlementsPath := filepath.Join(filepath.Dir(app), "runbp-preview-entitlements.plist")
+	if err := os.WriteFile(entitlementsPath, entitlements, 0600); err != nil {
+		return err
+	}
 	source := filepath.Join(filepath.Dir(app), "runbp-preview-host.m")
 	if err := os.WriteFile(source, []byte(runbpHostSource), 0600); err != nil {
 		return err
@@ -41,6 +51,7 @@ func runbpStageHost(ctx context.Context, app, deploymentTarget string) error {
 		return err
 	}
 	args := []string{"clang", "-fobjc-arc", "-target", "arm64-apple-ios" + deploymentTarget + "-simulator", "-isysroot", strings.TrimSpace(string(sdk)), "-framework", "UIKit", "-framework", "Foundation", "-Xlinker", "-needed_library", "-Xlinker", library, "-Xlinker", "-rpath", "-Xlinker", "@executable_path", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks", source, "-o", filepath.Join(app, executable)}
+	args = append(args, "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__entitlements", "-Xlinker", entitlementsPath)
 	if out, err := procgroup.Command(ctx, "xcrun", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("compiling preview host: %w\n%s", err, out)
 	}
@@ -59,6 +70,59 @@ func runbpStageHost(ctx context.Context, app, deploymentTarget string) error {
 		return fmt.Errorf("signing preview host: %w\n%s", err, out)
 	}
 	return nil
+}
+
+// Simulator capabilities live in the Mach-O section, not the ad-hoc signature.
+// Read the staged Xcode executable before replacing it, so substitutions and
+// configuration-specific entitlements have already been resolved by Xcode.
+func runbpHostEntitlements(executable, declared string) ([]byte, error) {
+	file, err := macho.Open(executable)
+	if err != nil {
+		return nil, fmt.Errorf("reading preview simulator entitlements: %w", err)
+	}
+	defer file.Close()
+	var data []byte
+	for _, section := range file.Sections {
+		if section.Seg == "__TEXT" && section.Name == "__entitlements" {
+			data, err = section.Data()
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	return runbpSimulatorEntitlements(data, declared)
+}
+
+func runbpSimulatorEntitlements(data []byte, declared string) ([]byte, error) {
+	entitlements := map[string]any{}
+	if len(data) > 0 {
+		if _, err := plist.Unmarshal(data, &entitlements); err != nil {
+			return nil, fmt.Errorf("invalid simulator entitlements: %w", err)
+		}
+	} else if declared != "" {
+		return nil, fmt.Errorf("preview app declares %s but its built simulator executable has no embedded entitlements; enable simulator signing in the Debug build configuration and rebuild", declared)
+	}
+	entitlements["get-task-allow"] = true
+	for key := range entitlements {
+		if key != "get-task-allow" && key != "com.apple.security.application-groups" {
+			slog.Warn(runbpCapabilityDiagnostic(key), "entitlement", key)
+		}
+	}
+	return plist.Marshal(entitlements, plist.XMLFormat)
+}
+
+func runbpCapabilityDiagnostic(key string) string {
+	switch key {
+	case "com.apple.developer.family-controls":
+		return "Preview cannot verify Screen Time authorization or enforcement; use runbp up on a provisioned physical device"
+	case "aps-environment":
+		return "Preview skips application-delegate push registration; verify notification setup and delivery through the full app"
+	case "application-identifier", "com.apple.application-identifier", "keychain-access-groups", "com.apple.developer.associated-domains":
+		return "Preview changes the app bundle ID; verify identity-dependent keychain, URL and associated-domain behavior through the full app"
+	default:
+		return "Preview preserves simulator entitlement metadata, but service availability needs explicit account, provisioning and runtime verification through the full app"
+	}
 }
 
 const runbpHostSource = `#import <UIKit/UIKit.h>
