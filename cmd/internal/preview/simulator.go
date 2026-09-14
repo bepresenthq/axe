@@ -23,7 +23,10 @@ func terminateApp(ctx context.Context, bs *build.Settings, device, deviceSetPath
 // It first checks BuiltProductsDir (configuration-specific), then falls back
 // to a glob across all configuration directories.
 func resolveAppBundle(bs *build.Settings, dirs previewDirs) (string, error) {
-	appName := bs.ModuleName + ".app"
+	appName := bs.FullProductName
+	if appName == "" {
+		appName = bs.ModuleName + ".app"
+	}
 	srcAppPath := filepath.Join(bs.BuiltProductsDir, appName)
 
 	if _, err := os.Stat(srcAppPath); err != nil {
@@ -85,6 +88,9 @@ func installApp(ctx context.Context, bs *build.Settings, dirs previewDirs, devic
 	rewriteEmbeddedAppExtensionBundleIDs(stagedAppPath, bs.OriginalBundleID, bs.BundleID)
 
 	if os.Getenv("RUNBP_CONTROL_DIR") != "" {
+		if err := runbpValidateHostBundleID(filepath.Join(stagedAppPath, "Info.plist"), bs.BundleID); err != nil {
+			return "", err
+		}
 		if err := runbpStageHost(ctx, stagedAppPath, bs.DeploymentTarget, bs.CodeSignEntitlements); err != nil {
 			return "", err
 		}
@@ -195,5 +201,27 @@ func launchWithHotReload(ctx context.Context, bs *build.Settings, loaderPath, th
 		"SIMCTL_CHILD_SWIFTUI_VIEW_DEBUG":      "287",
 	}
 
+	if dir := os.Getenv("RUNBP_CONTROL_DIR"); dir != "" {
+		if err := runbpWriteHostIdentity(dir, bs, device); err != nil {
+			return err
+		}
+	}
 	return ar.Launch(ctx, device, bs.BundleID, deviceSetPath, env, nil)
+}
+
+// Controlled health and launch metadata must describe the installed app, not a
+// best-effort Info.plist rewrite that failed silently.
+func runbpValidateHostBundleID(plistPath, expected string) error {
+	data, err := os.ReadFile(plistPath)
+	if err != nil {
+		return fmt.Errorf("reading preview host identity: %w", err)
+	}
+	var info map[string]any
+	if _, err := plist.Unmarshal(data, &info); err != nil {
+		return fmt.Errorf("reading preview host identity: %w", err)
+	}
+	if actual, _ := info["CFBundleIdentifier"].(string); actual != expected || expected == "" {
+		return fmt.Errorf("staged preview host bundle identifier %q does not match resolved build settings %q", actual, expected)
+	}
+	return nil
 }
