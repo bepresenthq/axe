@@ -200,3 +200,50 @@ func runbpWaitForDevice(ctx context.Context, marker, device string) error {
 		}
 	}
 }
+
+// Host identity is published before launch, independently of the layout ACK.
+// backendPid binds it to the owning axe process; request IDs are diagnostic
+// only, because later hot reloads do not necessarily launch a new host.
+type runbpHostIdentity struct {
+	Schema            string `json:"schema"`
+	BundleID          string `json:"bundleId"`
+	OriginalBundleID  string `json:"originalBundleId"`
+	TargetName        string `json:"targetName"`
+	DeviceID          string `json:"deviceId"`
+	BackendPID        int    `json:"backendPid"`
+	LaunchRequestedAt string `json:"launchRequestedAt"`
+	RequestID         string `json:"requestId,omitempty"`
+	Revision          string `json:"revision,omitempty"`
+}
+
+func runbpWriteHostIdentity(dir string, settings *build.Settings, device string) error {
+	identity := runbpHostIdentity{
+		Schema: "runbp.preview.host.v1", BundleID: settings.BundleID,
+		OriginalBundleID: settings.OriginalBundleID, TargetName: settings.TargetName,
+		DeviceID: device, BackendPID: os.Getpid(),
+		LaunchRequestedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if request, err := runbpRead(dir); err == nil {
+		identity.RequestID, identity.Revision = request.ID, request.Revision
+	}
+	data, err := json.Marshal(identity)
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(dir, ".host-*.tmp")
+	if err != nil {
+		return fmt.Errorf("publishing preview host identity: %w", err)
+	}
+	defer os.Remove(file.Name())
+	if _, err = file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(file.Name(), filepath.Join(dir, "host.json")); err != nil {
+		return fmt.Errorf("publishing preview host identity: %w", err)
+	}
+	return nil
+}

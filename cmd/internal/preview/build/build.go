@@ -71,28 +71,15 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 		return nil, fmt.Errorf("xcodebuild -showBuildSettings failed: %w\n%s", err, out)
 	}
 
-	keys := map[string]string{
-		"PRODUCT_MODULE_NAME":        "",
-		"TARGET_NAME":                "",
-		"CONFIGURATION":              "",
-		"PRODUCT_BUNDLE_IDENTIFIER":  "",
-		"IPHONEOS_DEPLOYMENT_TARGET": "",
-		"SWIFT_VERSION":              "",
-		"CODE_SIGN_ENTITLEMENTS":     "",
-	}
-
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		for k := range keys {
-			prefix := k + " = "
-			if after, ok := strings.CutPrefix(line, prefix); ok {
-				keys[k] = strings.TrimSpace(after)
-			}
-		}
+	keys, err := selectAppBuildSettings(string(out), pc.Scheme)
+	if err != nil {
+		return nil, err
 	}
 
 	config := pc.Configuration
+	if config == "" {
+		config = keys["CONFIGURATION"]
+	}
 	if config == "" {
 		config = "Debug"
 	}
@@ -101,6 +88,7 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 	s := &Settings{
 		ModuleName:           keys["PRODUCT_MODULE_NAME"],
 		TargetName:           keys["TARGET_NAME"],
+		FullProductName:      keys["FULL_PRODUCT_NAME"],
 		Configuration:        config,
 		BundleID:             "axe." + keys["PRODUCT_BUNDLE_IDENTIFIER"],
 		OriginalBundleID:     keys["PRODUCT_BUNDLE_IDENTIFIER"],
@@ -128,6 +116,61 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 		"swiftVersion", s.SwiftVersion,
 	)
 	return s, nil
+}
+
+// Select an entire app target block before reading any setting. A scheme may
+// also emit extensions, frameworks and test targets, each with different IDs
+// and entitlements. Headerless single-target output remains supported.
+func selectAppBuildSettings(output, scheme string) (map[string]string, error) {
+	var blocks []map[string]string
+	current := map[string]string{}
+	flush := func() {
+		if len(current) > 0 {
+			blocks = append(blocks, current)
+		}
+		current = map[string]string{}
+	}
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "Build settings for action ") && strings.Contains(line, " and target ") && strings.HasSuffix(line, ":") {
+			flush()
+			_, name, _ := strings.Cut(line, " and target ")
+			current["TARGET_NAME"] = strings.TrimSuffix(name, ":")
+			continue
+		}
+		if key, value, ok := strings.Cut(line, " ="); ok && key != "" && !strings.ContainsAny(key, " \t") {
+			current[key] = strings.TrimSpace(value)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading build settings: %w", err)
+	}
+	flush()
+	var apps []map[string]string
+	for _, block := range blocks {
+		productType := block["PRODUCT_TYPE"]
+		if productType == "com.apple.product-type.application" ||
+			(productType == "" && (block["WRAPPER_EXTENSION"] == "app" || strings.HasSuffix(block["FULL_PRODUCT_NAME"], ".app"))) {
+			apps = append(apps, block)
+		}
+	}
+	if len(apps) == 1 {
+		return apps[0], nil
+	}
+	// Multiple application products are ambiguous even when one happens to
+	// share the scheme's name: scheme names do not identify the runnable target.
+	if len(apps) > 1 {
+		return nil, fmt.Errorf("scheme %q has multiple application targets in build settings; choose a scheme with one runnable iOS app", scheme)
+	}
+	if len(blocks) == 0 {
+		return map[string]string{}, nil
+	}
+	if len(blocks) == 1 && blocks[0]["PRODUCT_TYPE"] == "" && blocks[0]["WRAPPER_EXTENSION"] == "" {
+		return blocks[0], nil
+	}
+	return nil, fmt.Errorf("scheme %q does not identify a single application target in build settings", scheme)
 }
 
 // Run executes "xcodebuild build" with the flags required for axe preview
@@ -386,7 +429,10 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 // HasPreviousBuild checks whether a .app bundle exists in the build products
 // directory, indicating that a previous build can be reused.
 func HasPreviousBuild(s *Settings, dirs ProjectDirs) bool {
-	appName := s.ModuleName + ".app"
+	appName := s.FullProductName
+	if appName == "" {
+		appName = s.ModuleName + ".app"
+	}
 	primaryPath := filepath.Join(s.BuiltProductsDir, appName)
 	if _, err := os.Stat(primaryPath); err == nil {
 		return true

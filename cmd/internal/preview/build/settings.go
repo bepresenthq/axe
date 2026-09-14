@@ -5,6 +5,7 @@ package build
 type Settings struct {
 	ModuleName           string
 	TargetName           string
+	FullProductName      string
 	Configuration        string
 	BundleID             string // axe-prefixed bundle ID (used for terminate/launch)
 	OriginalBundleID     string // original bundle ID from xcodebuild
