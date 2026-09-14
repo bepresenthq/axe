@@ -78,6 +78,7 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 		"PRODUCT_BUNDLE_IDENTIFIER":  "",
 		"IPHONEOS_DEPLOYMENT_TARGET": "",
 		"SWIFT_VERSION":              "",
+		"CODE_SIGN_ENTITLEMENTS":     "",
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
@@ -98,14 +99,15 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 	builtProductsDir := filepath.Join(dirs.Build, "Build", "Products", config+"-iphonesimulator")
 
 	s := &Settings{
-		ModuleName:       keys["PRODUCT_MODULE_NAME"],
-		TargetName:       keys["TARGET_NAME"],
-		Configuration:    config,
-		BundleID:         "axe." + keys["PRODUCT_BUNDLE_IDENTIFIER"],
-		OriginalBundleID: keys["PRODUCT_BUNDLE_IDENTIFIER"],
-		BuiltProductsDir: builtProductsDir,
-		DeploymentTarget: keys["IPHONEOS_DEPLOYMENT_TARGET"],
-		SwiftVersion:     keys["SWIFT_VERSION"],
+		ModuleName:           keys["PRODUCT_MODULE_NAME"],
+		TargetName:           keys["TARGET_NAME"],
+		Configuration:        config,
+		BundleID:             "axe." + keys["PRODUCT_BUNDLE_IDENTIFIER"],
+		OriginalBundleID:     keys["PRODUCT_BUNDLE_IDENTIFIER"],
+		BuiltProductsDir:     builtProductsDir,
+		DeploymentTarget:     keys["IPHONEOS_DEPLOYMENT_TARGET"],
+		SwiftVersion:         keys["SWIFT_VERSION"],
+		CodeSignEntitlements: keys["CODE_SIGN_ENTITLEMENTS"],
 	}
 
 	if s.ModuleName == "" {

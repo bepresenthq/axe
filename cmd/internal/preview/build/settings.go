@@ -3,14 +3,15 @@ package build
 // Settings holds values extracted from xcodebuild -showBuildSettings,
 // plus additional compiler paths extracted from the swiftc response file.
 type Settings struct {
-	ModuleName       string
-	TargetName       string
-	Configuration    string
-	BundleID         string // axe-prefixed bundle ID (used for terminate/launch)
-	OriginalBundleID string // original bundle ID from xcodebuild
-	BuiltProductsDir string
-	DeploymentTarget string
-	SwiftVersion     string
+	ModuleName           string
+	TargetName           string
+	Configuration        string
+	BundleID             string // axe-prefixed bundle ID (used for terminate/launch)
+	OriginalBundleID     string // original bundle ID from xcodebuild
+	BuiltProductsDir     string
+	DeploymentTarget     string
+	SwiftVersion         string
+	CodeSignEntitlements string
 
 	// Fields below are populated by ExtractCompilerPaths after build.
 	ExtraIncludePaths   []string // additional -I paths (SPM C module headers)

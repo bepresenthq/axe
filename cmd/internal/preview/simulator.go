@@ -85,7 +85,7 @@ func installApp(ctx context.Context, bs *build.Settings, dirs previewDirs, devic
 	rewriteEmbeddedAppExtensionBundleIDs(stagedAppPath, bs.OriginalBundleID, bs.BundleID)
 
 	if os.Getenv("RUNBP_CONTROL_DIR") != "" {
-		if err := runbpStageHost(ctx, stagedAppPath, bs.DeploymentTarget); err != nil {
+		if err := runbpStageHost(ctx, stagedAppPath, bs.DeploymentTarget, bs.CodeSignEntitlements); err != nil {
 			return "", err
 		}
 	}
